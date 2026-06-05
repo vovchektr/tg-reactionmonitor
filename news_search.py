@@ -24,6 +24,7 @@ RSS_SOURCES = [
 ]
 
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=10)
+MAX_RESULTS = 20
 MAX_SUMMARY_LEN = 300
 MOSCOW = timezone(timedelta(hours=3))
 
@@ -90,8 +91,6 @@ async def _fetch_feed(session: aiohttp.ClientSession, source: dict) -> list[dict
 
 async def search_news(query: str) -> dict:
     raw_keywords = [w.strip().lower() for w in query.split() if w.strip()]
-    keywords_exact = [f'"{w}"' in query.lower() for w in raw_keywords]
-
     require_all = True
 
     async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (compatible; TGNewsBot/1.0)"}) as session:
@@ -151,7 +150,7 @@ def format_results(data: dict) -> str:
         "",
     ]
 
-    for i, item in enumerate(results, 1):
+    for i, item in enumerate(results[:MAX_RESULTS], 1):
         title = item["title"] or "Без заголовка"
         link = item["link"]
         source = item["source"]

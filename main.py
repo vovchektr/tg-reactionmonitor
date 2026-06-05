@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import html
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -10,6 +11,7 @@ from telegram.ext import (
 
 from news_search import search_news, format_results
 from sentiment import analyze_sentiment, format_sentiment_report
+from ai_analysis import analyze_news_with_ai, format_ai_analysis
 
 load_dotenv()
 
@@ -55,10 +57,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/help — показать это сообщение\n"
         "/status — статус бота\n"
         "/news &lt;запрос&gt; — поиск новостей по ключевым словам\n"
-        "/monitor &lt;запрос&gt; — поиск + анализ тональности\n\n"
+        "/monitor &lt;запрос&gt; — поиск + анализ тональности + AI-сводка\n"
+        "/report &lt;запрос&gt; — аналитическая записка по новостям\n\n"
         "Примеры:\n"
         "/news санкции нефть\n"
-        "/monitor инфляция экономика"
+        "/monitor инфляция экономика\n"
+        "/report инфляция экономика"
     )
     await update.message.reply_text(help_text, parse_mode="HTML")
 
@@ -100,16 +104,23 @@ async def monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Запрос слишком короткий. Введите хотя бы 2 символа.")
         return
 
-    msg = await update.message.reply_text("📡 Собираю данные и анализирую тональность...")
+    msg = await update.message.reply_text("📡 Собираю данные, анализирую тональность и готовлю AI-сводку...")
     try:
         data = await search_news(query)
         all_texts = [f"{item['title']} {item['summary']}" for item in data["results"]]
         sentiment = analyze_sentiment(all_texts)
+        ai_analysis = await analyze_news_with_ai(data["results"])
 
         text = format_sentiment_report(query, data, sentiment, offset=0, limit=5)
+        text = f"{text}\n\n{format_ai_analysis(ai_analysis)}"
         keyboard = _monitor_keyboard(offset=0, total=data["total"])
 
-        context.user_data["monitor"] = {"data": data, "sentiment": sentiment, "query": query}
+        context.user_data["monitor"] = {
+            "data": data,
+            "sentiment": sentiment,
+            "query": query,
+            "ai_analysis": ai_analysis,
+        }
 
         await msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True,
                             reply_markup=keyboard)
@@ -139,13 +150,52 @@ async def monitor_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     data = saved["data"]
     sentiment = saved["sentiment"]
     query = saved["query"]
+    ai_analysis = saved.get("ai_analysis")
 
     text = format_sentiment_report(query, data, sentiment, offset=offset, limit=limit)
+    if ai_analysis:
+        text = f"{text}\n\n{format_ai_analysis(ai_analysis)}"
     keyboard = _monitor_keyboard(offset=offset, total=data["total"], limit=limit)
 
     await query_obj.edit_message_text(
         text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=keyboard
     )
+
+
+async def report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = " ".join(context.args).strip() if context.args else ""
+    if not query:
+        await update.message.reply_text(
+            "Укажите запрос для аналитической записки.\nПример: /report инфляция экономика"
+        )
+        return
+    if len(query) < 2:
+        await update.message.reply_text("Запрос слишком короткий. Введите хотя бы 2 символа.")
+        return
+
+    msg = await update.message.reply_text("📝 Собираю новости и готовлю аналитическую записку...")
+    try:
+        data = await search_news(query)
+        all_texts = [f"{item['title']} {item['summary']}" for item in data["results"]]
+        sentiment = analyze_sentiment(all_texts)
+        ai_analysis = await analyze_news_with_ai(data["results"])
+
+        text = "\n\n".join([
+            f"📝 <b>Аналитическая записка: «{html.escape(query)}»</b>",
+            f"Найдено материалов: {data['total']}",
+            (
+                "Тональность: "
+                f"{sentiment.color_label}, индекс {sentiment.score:+.2f} "
+                f"(позитив {sentiment.pos_pct:.1f}%, негатив {sentiment.neg_pct:.1f}%, "
+                f"нейтрально {sentiment.neu_pct:.1f}%)"
+            ),
+            format_ai_analysis(ai_analysis, title="AI-аналитика"),
+        ])
+
+        await msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as exc:
+        logger.error("Ошибка генерации отчета: %s", exc, exc_info=True)
+        await msg.edit_text("⚠️ Произошла ошибка при подготовке отчета. Попробуйте позже.")
 
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -164,6 +214,7 @@ def main() -> None:
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("news", news_search))
     app.add_handler(CommandHandler("monitor", monitor))
+    app.add_handler(CommandHandler("report", report))
     app.add_handler(CallbackQueryHandler(monitor_page, pattern=r'^\{"a": "mon"'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 

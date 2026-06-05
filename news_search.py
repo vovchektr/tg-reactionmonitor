@@ -11,18 +11,17 @@ import feedparser
 logger = logging.getLogger(__name__)
 
 RSS_SOURCES = [
-    {"name": "Lenta.ru",     "url": "https://lenta.ru/rss/news"},
-    {"name": "RBK",          "url": "https://rssexport.rbc.ru/rbcnews/news/30/full.rss"},
-    {"name": "Известия",     "url": "https://iz.ru/xml/rss/all.xml"},
-    {"name": "Фонтанка",     "url": "https://www.fontanka.ru/fontanka.rss"},
+    {"name": "РБК",          "url": "https://rssexport.rbc.ru/rbcnews/news/30/full.rss"},
+    {"name": "Коммерсантъ",  "url": "https://www.kommersant.ru/RSS/news.xml"},
+    {"name": "Медуза",       "url": "https://meduza.io/rss/all"},
+    {"name": "Ведомости",    "url": "https://www.vedomosti.ru/rss/news"},
+    {"name": "Новая газета", "url": "https://novayagazeta.ru/rss/all.xml"},
+    {"name": "BBC Россия",   "url": "https://feeds.bbci.co.uk/russian/rss.xml"},
+    {"name": "Царьград",     "url": "https://tsargrad.tv/rss"},
+    {"name": "Дождь",        "url": "https://tvrain.ru/export/rss/all.xml"},
+    {"name": "Ura.ru",       "url": "https://ura.news/rss"},
     {"name": "РИА Новости",  "url": "https://feeds.feedburner.com/ria/news"},
     {"name": "ТАСС",         "url": "https://tass.ru/rss/v2.xml"},
-    {"name": "Коммерсантъ",  "url": "https://www.kommersant.ru/RSS/news.xml"},
-    {"name": "Газета.ru",    "url": "https://www.gazeta.ru/export/rss/lenta.xml"},
-    {"name": "Медуза",       "url": "https://meduza.io/rss/all"},
-    {"name": "Российская газета", "url": "https://rg.ru/xml/index.xml"},
-    {"name": "Новая газета", "url": "https://novayagazeta.ru/rss/all.xml"},
-    {"name": "Интерфакс",    "url": "https://www.interfax.ru/rss.asp"},
 ]
 
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=10)

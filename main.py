@@ -1,8 +1,12 @@
+import json
 import logging
 import os
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Application, CallbackQueryHandler, CommandHandler,
+    ContextTypes, MessageHandler, filters,
+)
 
 from news_search import search_news, format_results
 from sentiment import analyze_sentiment, format_sentiment_report
@@ -16,6 +20,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+
+def _monitor_keyboard(offset: int, total: int, limit: int = 5) -> InlineKeyboardMarkup | None:
+    next5 = offset + limit
+    next10 = offset + limit * 2
+    buttons = []
+    if next5 < total:
+        buttons.append(InlineKeyboardButton(
+            f"Ещё 5 статей ({next5 + 1}–{min(next5 + 5, total)})",
+            callback_data=json.dumps({"a": "mon", "o": next5, "l": 5}),
+        ))
+    if next10 < total:
+        buttons.append(InlineKeyboardButton(
+            f"Ещё 10 статей ({offset + limit + 1}–{min(offset + limit + 10, total)})",
+            callback_data=json.dumps({"a": "mon", "o": next5, "l": 10}),
+        ))
+    if not buttons:
+        return None
+    return InlineKeyboardMarkup([buttons])
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -43,26 +66,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "✅ Бот работает нормально.\n"
-        "📡 Подключено источников: 12"
+        "📡 Подключено источников: 11"
     )
 
 
 async def news_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = " ".join(context.args).strip() if context.args else ""
-
     if not query:
-        await update.message.reply_text(
-            "Укажите поисковый запрос после команды.\n"
-            "Пример: /news санкции нефть"
-        )
+        await update.message.reply_text("Укажите поисковый запрос.\nПример: /news санкции нефть")
         return
-
     if len(query) < 2:
         await update.message.reply_text("Запрос слишком короткий. Введите хотя бы 2 символа.")
         return
 
     msg = await update.message.reply_text("🔍 Ищу новости, подождите...")
-
     try:
         data = await search_news(query)
         text = format_results(data)
@@ -74,34 +91,61 @@ async def news_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = " ".join(context.args).strip() if context.args else ""
-
     if not query:
         await update.message.reply_text(
-            "Укажите запрос для мониторинга.\n"
-            "Пример: /monitor инфляция экономика"
+            "Укажите запрос для мониторинга.\nПример: /monitor инфляция экономика"
         )
         return
-
     if len(query) < 2:
         await update.message.reply_text("Запрос слишком короткий. Введите хотя бы 2 символа.")
         return
 
     msg = await update.message.reply_text("📡 Собираю данные и анализирую тональность...")
-
     try:
         data = await search_news(query)
-
-        all_texts = [
-            f"{item['title']} {item['summary']}"
-            for item in data["results"]
-        ]
-
+        all_texts = [f"{item['title']} {item['summary']}" for item in data["results"]]
         sentiment = analyze_sentiment(all_texts)
-        text = format_sentiment_report(query, data, sentiment)
-        await msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
+
+        text = format_sentiment_report(query, data, sentiment, offset=0, limit=5)
+        keyboard = _monitor_keyboard(offset=0, total=data["total"])
+
+        context.user_data["monitor"] = {"data": data, "sentiment": sentiment, "query": query}
+
+        await msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True,
+                            reply_markup=keyboard)
     except Exception as exc:
         logger.error("Ошибка мониторинга: %s", exc, exc_info=True)
         await msg.edit_text("⚠️ Произошла ошибка при анализе. Попробуйте позже.")
+
+
+async def monitor_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query_obj = update.callback_query
+    await query_obj.answer()
+
+    try:
+        payload = json.loads(query_obj.data)
+        if payload.get("a") != "mon":
+            return
+        offset = int(payload["o"])
+        limit = int(payload["l"])
+    except Exception:
+        return
+
+    saved = context.user_data.get("monitor")
+    if not saved:
+        await query_obj.edit_message_text("⚠️ Данные устарели. Выполните /monitor заново.")
+        return
+
+    data = saved["data"]
+    sentiment = saved["sentiment"]
+    query = saved["query"]
+
+    text = format_sentiment_report(query, data, sentiment, offset=offset, limit=limit)
+    keyboard = _monitor_keyboard(offset=offset, total=data["total"], limit=limit)
+
+    await query_obj.edit_message_text(
+        text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=keyboard
+    )
 
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -110,8 +154,8 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN не задан. Добавьте его в файл .env или переменные окружения.")
-        raise ValueError("BOT_TOKEN is required. Set it in .env or environment variables.")
+        logger.error("BOT_TOKEN не задан.")
+        raise ValueError("BOT_TOKEN is required.")
 
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -120,6 +164,7 @@ def main() -> None:
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("news", news_search))
     app.add_handler(CommandHandler("monitor", monitor))
+    app.add_handler(CallbackQueryHandler(monitor_page, pattern=r'^\{"a": "mon"'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     logger.info("Бот запускается...")

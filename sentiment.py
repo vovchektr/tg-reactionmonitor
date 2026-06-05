@@ -153,9 +153,11 @@ def _bar(pct: float, width: int = 10) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
-def format_sentiment_report(query: str, data: dict, sentiment: SentimentResult) -> str:
-    results = data["results"]
+def format_sentiment_report(query: str, data: dict, sentiment: SentimentResult,
+                            offset: int = 0, limit: int = 5) -> str:
+    all_results = data["results"]
     total_found = data["total"]
+    page_items = all_results[offset:offset + limit]
 
     lines = [
         f"📊 <b>Мониторинг: «{query}»</b>",
@@ -170,9 +172,11 @@ def format_sentiment_report(query: str, data: dict, sentiment: SentimentResult) 
         "",
     ]
 
-    if results:
-        lines.append("─── Свежие материалы ───")
-        for i, item in enumerate(results[:5], 1):
+    if page_items:
+        shown_from = offset + 1
+        shown_to = offset + len(page_items)
+        lines.append(f"─── Материалы {shown_from}–{shown_to} из {total_found} ───")
+        for i, item in enumerate(page_items, offset + 1):
             title = item["title"] or "Без заголовка"
             link = item["link"]
             source = item["source"]

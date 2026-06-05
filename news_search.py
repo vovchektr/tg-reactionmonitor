@@ -1,8 +1,7 @@
 import asyncio
 import logging
 import re
-import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import aiohttp
@@ -25,8 +24,8 @@ RSS_SOURCES = [
 ]
 
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=10)
-MAX_RESULTS = 5
 MAX_SUMMARY_LEN = 300
+MOSCOW = timezone(timedelta(hours=3))
 
 
 def _normalize(text: str) -> str:
@@ -49,7 +48,8 @@ def _parse_date(entry) -> Optional[datetime]:
         val = entry.get(field)
         if val:
             try:
-                return datetime(*val[:6], tzinfo=timezone.utc)
+                dt_utc = datetime(*val[:6], tzinfo=timezone.utc)
+                return dt_utc.astimezone(MOSCOW)
             except Exception:
                 pass
     return None
@@ -108,16 +108,15 @@ async def search_news(query: str) -> dict:
         matched = [item for item in all_items if _matches(item["entry"], raw_keywords, require_all=False)]
         require_all = False
 
-    matched.sort(key=lambda x: x["date"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    matched.sort(key=lambda x: x["date"] or datetime.min.replace(tzinfo=MOSCOW), reverse=True)
 
     sources_hit = list({item["source"] for item in matched})
-    top = matched[:MAX_RESULTS]
 
     return {
         "query": query,
         "keywords": raw_keywords,
         "total": len(matched),
-        "results": top,
+        "results": matched,
         "require_all": require_all,
         "sources_fetched": len(all_items),
         "sources_hit": sources_hit,

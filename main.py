@@ -5,6 +5,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from news_search import search_news, format_results
+from sentiment import analyze_sentiment, format_sentiment_report
 
 load_dotenv()
 
@@ -30,17 +31,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/start — начать работу\n"
         "/help — показать это сообщение\n"
         "/status — статус бота\n"
-        "/news &lt;запрос&gt; — поиск новостей по ключевым словам\n\n"
-        "Пример: /news санкции нефть"
+        "/news &lt;запрос&gt; — поиск новостей по ключевым словам\n"
+        "/monitor &lt;запрос&gt; — поиск + анализ тональности\n\n"
+        "Примеры:\n"
+        "/news санкции нефть\n"
+        "/monitor инфляция экономика"
     )
     await update.message.reply_text(help_text, parse_mode="HTML")
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    sources_count = 12
     await update.message.reply_text(
-        f"✅ Бот работает нормально.\n"
-        f"📡 Подключено источников: {sources_count}"
+        "✅ Бот работает нормально.\n"
+        "📡 Подключено источников: 12"
     )
 
 
@@ -66,9 +69,39 @@ async def news_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
     except Exception as exc:
         logger.error("Ошибка поиска новостей: %s", exc, exc_info=True)
-        await msg.edit_text(
-            "⚠️ Произошла ошибка при поиске. Попробуйте позже."
+        await msg.edit_text("⚠️ Произошла ошибка при поиске. Попробуйте позже.")
+
+
+async def monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = " ".join(context.args).strip() if context.args else ""
+
+    if not query:
+        await update.message.reply_text(
+            "Укажите запрос для мониторинга.\n"
+            "Пример: /monitor инфляция экономика"
         )
+        return
+
+    if len(query) < 2:
+        await update.message.reply_text("Запрос слишком короткий. Введите хотя бы 2 символа.")
+        return
+
+    msg = await update.message.reply_text("📡 Собираю данные и анализирую тональность...")
+
+    try:
+        data = await search_news(query)
+
+        all_texts = [
+            f"{item['title']} {item['summary']}"
+            for item in data["results"]
+        ]
+
+        sentiment = analyze_sentiment(all_texts)
+        text = format_sentiment_report(query, data, sentiment)
+        await msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as exc:
+        logger.error("Ошибка мониторинга: %s", exc, exc_info=True)
+        await msg.edit_text("⚠️ Произошла ошибка при анализе. Попробуйте позже.")
 
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -86,6 +119,7 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("news", news_search))
+    app.add_handler(CommandHandler("monitor", monitor))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     logger.info("Бот запускается...")

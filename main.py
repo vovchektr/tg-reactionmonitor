@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
+from news_search import search_news, format_results
+
 load_dotenv()
 
 logging.basicConfig(
@@ -28,12 +30,45 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/start — начать работу\n"
         "/help — показать это сообщение\n"
         "/status — статус бота\n"
+        "/news &lt;запрос&gt; — поиск новостей по ключевым словам\n\n"
+        "Пример: /news санкции нефть"
     )
-    await update.message.reply_text(help_text)
+    await update.message.reply_text(help_text, parse_mode="HTML")
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("Бот работает нормально.")
+    sources_count = 12
+    await update.message.reply_text(
+        f"✅ Бот работает нормально.\n"
+        f"📡 Подключено источников: {sources_count}"
+    )
+
+
+async def news_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = " ".join(context.args).strip() if context.args else ""
+
+    if not query:
+        await update.message.reply_text(
+            "Укажите поисковый запрос после команды.\n"
+            "Пример: /news санкции нефть"
+        )
+        return
+
+    if len(query) < 2:
+        await update.message.reply_text("Запрос слишком короткий. Введите хотя бы 2 символа.")
+        return
+
+    msg = await update.message.reply_text("🔍 Ищу новости, подождите...")
+
+    try:
+        data = await search_news(query)
+        text = format_results(data)
+        await msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as exc:
+        logger.error("Ошибка поиска новостей: %s", exc, exc_info=True)
+        await msg.edit_text(
+            "⚠️ Произошла ошибка при поиске. Попробуйте позже."
+        )
 
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -50,6 +85,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("news", news_search))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     logger.info("Бот запускается...")
